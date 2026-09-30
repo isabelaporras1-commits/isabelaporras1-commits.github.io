@@ -1,0 +1,42 @@
+{
+  "name": "Simulador Cardiorrespiratorio RA",
+  "short_name": "CardioRA",
+  "description": "Corazón, vasos y respiración en tiempo real con realidad aumentada y control por gestos.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "display_override": [
+    "fullscreen",
+    "standalone"
+  ],
+  "orientation": "any",
+  "background_color": "#0f1c26",
+  "theme_color": "#0f1c26",
+  "lang": "es",
+  "dir": "ltr",
+  "categories": [
+    "education",
+    "medical"
+  ],
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
