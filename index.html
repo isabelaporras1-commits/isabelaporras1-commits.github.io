@@ -166,6 +166,11 @@ body.xr .micro{top:auto;bottom:128px}
 /* ---- Sin panel lateral: todo se maneja en la consola 3D ---- */
 .controls,#ctlToggle{display:none !important}
 #handDock{position:absolute;top:14px;right:16px;width:300px;padding:12px 14px;z-index:6}
+#dockToggle{position:absolute;top:14px;right:326px;z-index:7;width:44px;height:44px;border-radius:50%;border:1px solid var(--line);
+  background:var(--panel);color:var(--ink);font-size:20px;line-height:1;cursor:pointer;box-shadow:var(--shadow);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+body.dock-min #handDock{display:none !important}
+body.dock-min #dockToggle{right:16px}
+body.xr #dockToggle{display:none}
 #handDock .btn{width:100%}
 #handDock #handStatus{margin:8px 0 0}
 #handDock .gestures{display:none}
@@ -175,7 +180,9 @@ body.ar #handDock .btn:not(.keep),body.ar #handDock .dockhint,body.ar #camBgWrap
 body.rear #handDock .keep{width:100%}
 body.ar #handDock #handStatus{margin:0}
 body.xr #handDock{display:none}
-@media (max-width:820px){ #handDock{left:12px;right:12px;width:auto;top:auto;bottom:10px} }
+@media (max-width:820px){ #handDock{left:12px;right:12px;width:auto;top:auto;bottom:calc(10px + env(safe-area-inset-bottom,0px))}
+  #dockToggle,body.dock-min #dockToggle{top:auto;right:14px;bottom:calc(14px + env(safe-area-inset-bottom,0px))}
+  body:not(.dock-min) #dockToggle{bottom:calc(var(--dockH,220px) + 22px + env(safe-area-inset-bottom,0px))} }
 
 #modelCredit{position:absolute;left:16px;bottom:10px;margin:0;font-size:11.5px;color:var(--muted);background:var(--panel);padding:3px 9px;border-radius:7px;z-index:4;max-width:70vw}
 body.ar #modelCredit{color:#e3ecf2;background:rgba(10,22,30,.7)}
@@ -230,13 +237,14 @@ body.xr .seg button{padding:9px 0}
 
   <button class="btn primary" id="ctlToggle" aria-expanded="false" aria-controls="controls">Controles</button>
 
+  <button id="dockToggle" aria-expanded="true" aria-controls="handDock" title="Mostrar u ocultar opciones">✕</button>
   <aside class="panel" id="handDock">
     <div>
       <button class="btn primary" id="handBtn">Activar control con manos</button>
       <button class="btn keep" id="rearBtn" style="margin-top:8px">Cámara trasera (iPhone y Android)</button>
       <button class="btn keep" id="recenterBtn" style="margin-top:8px">Recentrar el modelo al frente</button>
       <button class="btn keep" id="bodyBtn" style="margin-top:8px">Superponer en el cuerpo</button>
-      <label class="small" id="rearHandsWrap" style="display:flex;align-items:center;gap:7px;margin-top:6px"><input type="checkbox" id="tRearHands" checked> Usar la otra mano frente a la cámara trasera</label>
+      <label class="small" id="rearHandsWrap" style="display:flex;align-items:center;gap:7px;margin-top:6px"><input type="checkbox" id="tRearHands"> Usar la otra mano frente a la cámara trasera</label>
       <p class="small" id="handStatus">Usa la cámara frontal. Tus imágenes se procesan en este navegador.</p>
       <label class="small" style="display:none;align-items:center;gap:7px;margin-top:8px" id="camBgWrap"><input type="checkbox" id="tCam" checked> Mostrar la cámara de fondo</label>
       <ul class="gestures">
@@ -564,8 +572,12 @@ function newBeat(){
 
 /* ---------------- Three.js ---------------- */
 const canvas = $('#scene');
-const renderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:true});
-renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));
+const IS_MOBILE=/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)||(navigator.maxTouchPoints>1&&Math.min(screen.width,screen.height)<900);
+const renderer = new THREE.WebGLRenderer({canvas, antialias:!IS_MOBILE, alpha:true, powerPreference:'high-performance'});
+const PR_MAX=Math.min(window.devicePixelRatio||1,IS_MOBILE?1.5:2);
+let prNow=IS_MOBILE?Math.min(PR_MAX,1.25):PR_MAX;
+renderer.setPixelRatio(prNow);
+window.IS_MOBILE=IS_MOBILE;
 renderer.outputEncoding = THREE.sRGBEncoding;
 renderer.localClippingEnabled = true;
 renderer.xr.enabled = true;
@@ -681,7 +693,7 @@ icPaths.forEach(P=>{
   P.uAV=nearest(P.pts[P.av]); P.uSL=nearest(P.pts[P.sl]);
 });
 const icParts=[];
-icPaths.forEach((P,pi)=>{ for(let i=0;i<230;i++){ const o=V(Math.random()-0.5,Math.random()-0.5,Math.random()-0.5).multiplyScalar(2); if(o.length()>1) o.normalize(); icParts.push({p:pi,u:Math.random(),o}); } });
+icPaths.forEach((P,pi)=>{ for(let i=0;i<(IS_MOBILE?130:230);i++){ const o=V(Math.random()-0.5,Math.random()-0.5,Math.random()-0.5).multiplyScalar(2); if(o.length()>1) o.normalize(); icParts.push({p:pi,u:Math.random(),o}); } });
 const icGeo=new THREE.BufferGeometry();
 const icPos=new Float32Array(icParts.length*3), icCol=new Float32Array(icParts.length*3);
 icGeo.setAttribute('position',new THREE.BufferAttribute(icPos,3));
@@ -807,7 +819,7 @@ vesselDefs.forEach((def,vi)=>{
 /* Partículas (flujo con perfil parabólico de Poiseuille) */
 const particles=[];
 vessels.forEach(v=>{
-  const n=Math.round(v.len*28*Math.pow(v.r/0.12,0.7));
+  const n=Math.round(v.len*28*Math.pow(v.r/0.12,0.7)*(IS_MOBILE?0.55:1));
   for(let i=0;i<n;i++) particles.push({v:v.index, u:Math.random(), rho:Math.sqrt(Math.random())*0.82, phi:Math.random()*TAU});
 });
 const PN=particles.length;
@@ -2197,10 +2209,17 @@ function updateHud(){
     hud.group.scale.setScalar(MODEL_TO_M*xr.scale);
     hud.group.rotation.set(0,Math.atan2(xr.viewerPos.x-hudPos.x,xr.viewerPos.z-hudPos.z),0);
   } else { root.updateMatrixWorld(true); root.localToWorld(hudPos.copy(HEART_C)); hud.group.position.copy(hudPos); hud.group.scale.setScalar(Math.abs(root.scale.y)); hud.group.rotation.set(0,root.rotation.y,0); }
-  if(++hud.tick%2) return;
+  if(++hud.tick%(IS_MOBILE?5:2)) return;
   hud.panels.forEach(p=>{ p.draw(p.c); p.tex.needsUpdate=true; });
 }
 let hudOn=true;
+function setDock(open){
+  document.body.classList.toggle('dock-min',!open);
+  const b=$('#dockToggle'); b.textContent=open?'✕':'☰'; b.setAttribute('aria-expanded',open?'true':'false');
+  const d=$('#handDock'); if(open&&d) requestAnimationFrame(()=>document.documentElement.style.setProperty('--dockH',d.offsetHeight+'px'));
+}
+$('#dockToggle').addEventListener('click',()=>setDock(document.body.classList.contains('dock-min')));
+window.setDock=setDock;
 function setHud(on){ hudOn=on; document.body.classList.toggle('hud3d',on); const cb=$('#tHud'); if(cb) cb.checked=on; }
 
 /* ---------------- Cámara ---------------- */
@@ -2560,9 +2579,13 @@ function resize(){
 window.addEventListener('resize',resize); resize();
 
 let last=performance.now(), acc=0;
+const perf={ema:1/60,n:0};
 function frame(_t,xrf){
   const now=performance.now();
   const dt=Math.min(0.05,(now-last)/1000); last=now;
+  if(!renderer.xr.isPresenting){ perf.ema=perf.ema*0.95+dt*0.05; if(++perf.n%90===0){
+    if(perf.ema>1/38&&prNow>0.75){ prNow=Math.max(0.75,prNow-0.25); renderer.setPixelRatio(prNow); resize(); }
+    else if(perf.ema<1/56&&prNow<PR_MAX){ prNow=Math.min(PR_MAX,prNow+0.25); renderer.setPixelRatio(prNow); resize(); } } }
   let sdt=0;
   if(!state.paused){ sdt=dt*state.speed; acc+=sdt; while(acc>=H){ acc-=H; step(H); } }
   if(xrf) xrFrame(xrf);
@@ -2571,7 +2594,7 @@ function frame(_t,xrf){
   updateEPVisual(); updateHud();
   if(!renderer.xr.isPresenting){ if(body.on) updateBodyCam(); else if(rear.on) updateRearCam(); else updateCam(); }
   updateLabels(); updateUI();
-  drawECG(); drawSpiro();
+  if(!hudOn){ drawECG(); drawSpiro(); }
   renderer.render(scene,camera);
 }
 $('#glbInput').addEventListener('change',async e=>{ const f=e.target.files[0]; if(!f) return; loadHeartGLB(await f.arrayBuffer(),f.name.replace(/\.glb$/i,'')); e.target.value=''; });
@@ -2639,6 +2662,7 @@ window.SIM = {
   requestGyro: () => requestGyro(),
   setRear: on => setRear(on),
   rearRecenter: () => rearRecenter(),
+  toast: m => toast(m),
   setBody: (on,m) => setBody(on,m),
   bodyUpdate: o => bodyUpdate(o),
   clampPhi: p => clamp(p,0.25,2.9),
@@ -2679,7 +2703,7 @@ const LOST_GRACE = 260;                       // ms que se conserva una mano si 
 const DEAD_ZONE = 22;                         // px antes de empezar a rotar o arrastrar
 const ROT_GAIN = 0.0045;
 const FIST_HOLD = 2.0;
-const DETECT_MS = 33;                         // ~30 detecciones por segundo
+const DETECT_MS = window.IS_MOBILE ? 60 : 33;  // ~30 detecciones por segundo en PC, ~16 en teléfonos
 const clamp = (x,a,b) => Math.min(b,Math.max(a,x));
 let landmarker = null, stream = null, running = false, lastVT = -1, lastT = performance.now(), lastDetect = 0;
 const hands = {};
@@ -2733,6 +2757,7 @@ async function start(){
     $('#camBgWrap').style.display = 'flex';
     btn.textContent = 'Desactivar control con manos';
     status.textContent = 'Manos activas: junta pulgar e índice para tocar.';
+    autoMin();
     requestAnimationFrame(loop);
   }catch(e){ status.textContent = errMsg(e); }
   btn.disabled = false;
@@ -2777,7 +2802,7 @@ async function startRear(){
         status.textContent=msg+' También puedes pellizcar con tu otra mano frente a la cámara.'; }
       catch(e){ status.textContent=msg+' (No se pudo activar el control con manos.)'; }
     }
-    S.refresh();
+    S.refresh(); autoMin();
   }catch(e){ status.textContent=errMsg(e); stopRear(); }
   rearBtn.disabled=false;
 }
@@ -2813,6 +2838,7 @@ function toScreenExact(p){          // igual que toScreen pero sin amplificar: d
   const s=Math.max(W/vw,H/vh), dw=vw*s, dh=vh*s;
   return { x:(W-dw)/2+(rearMode?p.x:1-p.x)*dw, y:(H-dh)/2+p.y*dh };
 }
+function autoMin(){ if(window.setDock){ window.setDock(false); S.toast && S.toast(status.textContent+' (Toca ☰ para ver las opciones.)'); } }
 function bodyLabel(){ bodyBtn.textContent = bodyOn ? 'Quitar la superposición del cuerpo' : 'Superponer en el cuerpo'; }
 async function toggleBody(){
   if(bodyOn){ bodyOn=false; S.setBody(false); bodyLabel(); return; }
@@ -2823,6 +2849,7 @@ async function toggleBody(){
     if(!poser) poser=await createPoser();
     bodyOn=true; S.setBody(true,!rearMode); bodyLabel();
     status.textContent=rearMode?'Apunta a la persona: hombros y, si se puede, la cadera a la vista.':'Ponte de frente a la cámara con hombros y cadera a la vista.';
+    autoMin();
   }catch(e){ status.textContent='No se pudo cargar el detector de cuerpo. Revisa tu conexión a internet.'; }
   bodyBtn.disabled=false;
 }
