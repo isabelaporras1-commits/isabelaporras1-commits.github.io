@@ -235,6 +235,7 @@ body.xr .seg button{padding:9px 0}
       <button class="btn primary" id="handBtn">Activar control con manos</button>
       <button class="btn keep" id="rearBtn" style="margin-top:8px">Cámara trasera (iPhone y Android)</button>
       <button class="btn keep" id="recenterBtn" style="margin-top:8px">Recentrar el modelo al frente</button>
+      <button class="btn keep" id="bodyBtn" style="margin-top:8px">Superponer en el cuerpo</button>
       <label class="small" id="rearHandsWrap" style="display:flex;align-items:center;gap:7px;margin-top:6px"><input type="checkbox" id="tRearHands" checked> Usar la otra mano frente a la cámara trasera</label>
       <p class="small" id="handStatus">Usa la cámara frontal. Tus imágenes se procesan en este navegador.</p>
       <label class="small" style="display:none;align-items:center;gap:7px;margin-top:8px" id="camBgWrap"><input type="checkbox" id="tCam" checked> Mostrar la cámara de fondo</label>
@@ -2195,7 +2196,7 @@ function updateHud(){
     root.localToWorld(hudPos.copy(HEART_C)); hud.group.position.copy(hudPos);
     hud.group.scale.setScalar(MODEL_TO_M*xr.scale);
     hud.group.rotation.set(0,Math.atan2(xr.viewerPos.x-hudPos.x,xr.viewerPos.z-hudPos.z),0);
-  } else { root.updateMatrixWorld(true); root.localToWorld(hudPos.copy(HEART_C)); hud.group.position.copy(hudPos); hud.group.scale.setScalar(root.scale.x); hud.group.rotation.set(0,root.rotation.y,0); }
+  } else { root.updateMatrixWorld(true); root.localToWorld(hudPos.copy(HEART_C)); hud.group.position.copy(hudPos); hud.group.scale.setScalar(Math.abs(root.scale.y)); hud.group.rotation.set(0,root.rotation.y,0); }
   if(++hud.tick%2) return;
   hud.panels.forEach(p=>{ p.draw(p.c); p.tex.needsUpdate=true; });
 }
@@ -2240,6 +2241,33 @@ function updateRearCam(){
   root.scale.setScalar(rear.scale);
   camera.position.set(0,1.2,16);
   if(rear.has){ deviceQuat(rear.q); camera.quaternion.copy(rear.off).multiply(rear.q); } else camera.lookAt(0,1.2,0);
+}
+
+/* ---------------- Superposición sobre el cuerpo (detección de pose) ----------------
+   Con los hombros y la cadera detectados en el video, se calcula dónde, a qué distancia y con qué giro
+   debe estar el tórax para que su proyección coincida con el torso de la persona. */
+const body={on:false, mirror:false, obs:null, has:false, fov:45};
+const BODY_MC=V(0,-0.7,0);                      // centro del torso del modelo (entre hombros y cadera)
+const _bq=new THREE.Quaternion(), _bq2=new THREE.Quaternion(), _bp=V(0,0,0), _bm=V(0,0,0), _AZ=V(0,0,1), _AY=V(0,1,0);
+function setBody(on,mirror){
+  body.on=on; body.mirror=!!mirror; body.has=false; body.obs=null;
+  if(on){ camera.fov=body.fov; camera.updateProjectionMatrix(); spatial.group.scale.set(body.mirror?-0.85:0.85,0.85,0.85); }
+  else { root.position.set(0,0,0); root.quaternion.identity(); root.scale.set(1,1,1); spatial.group.scale.set(0.85,0.85,0.85);
+    camera.fov=rear.on?52:38; camera.updateProjectionMatrix(); if(!rear.on) defaultView(); }
+}
+function bodyUpdate(o){ if(o) body.obs=o; }
+function updateBodyCam(){
+  camera.position.set(0,0,0); camera.quaternion.identity(); camera.updateMatrixWorld();
+  const o=body.obs; if(!o) return;
+  const r=canvas.getBoundingClientRect(), th=Math.tan(THREE.MathUtils.degToRad(camera.fov/2));
+  const D=r.height/(2*th*o.ppu);                                     // distancia para que el tamaño coincida
+  const nx=(o.cx-r.left)/r.width*2-1, ny=-((o.cy-r.top)/r.height*2-1);
+  _bp.set(nx*D*th*camera.aspect,ny*D*th,-D);
+  _bq.setFromAxisAngle(_AZ,o.roll).multiply(_bq2.setFromAxisAngle(_AY,o.yaw));
+  const sx=body.mirror?-1:1;                                         // cámara frontal = espejo
+  _bm.copy(BODY_MC); _bm.x*=sx; _bm.applyQuaternion(_bq); _bp.sub(_bm);
+  const k=body.has?0.3:1; body.has=true;
+  root.position.lerp(_bp,k); root.quaternion.slerp(_bq,k); root.scale.set(sx,1,1);
 }
 function rotateView(dx,dy,g){ g=g||0.006; if(rear.on) root.rotation.y+=dx*g; else { orbit.theta-=dx*g; orbit.phi=clamp(orbit.phi-dy*g,0.25,2.9); } }
 
@@ -2541,7 +2569,7 @@ function frame(_t,xrf){
   animateScene(sdt);
   updateMicro(sdt,dt);
   updateEPVisual(); updateHud();
-  if(!renderer.xr.isPresenting){ if(rear.on) updateRearCam(); else updateCam(); }
+  if(!renderer.xr.isPresenting){ if(body.on) updateBodyCam(); else if(rear.on) updateRearCam(); else updateCam(); }
   updateLabels(); updateUI();
   drawECG(); drawSpiro();
   renderer.render(scene,camera);
@@ -2611,6 +2639,8 @@ window.SIM = {
   requestGyro: () => requestGyro(),
   setRear: on => setRear(on),
   rearRecenter: () => rearRecenter(),
+  setBody: (on,m) => setBody(on,m),
+  bodyUpdate: o => bodyUpdate(o),
   clampPhi: p => clamp(p,0.25,2.9),
   pick: (x,y) => pick(x,y),
   hoverAt: (x,y) => hoverXY(x,y),
@@ -2671,7 +2701,10 @@ class OneEuro{
 function fitHC(){ const d=Math.min(devicePixelRatio||1,2); hc.width=innerWidth*d; hc.height=innerHeight*d; hx.setTransform(d,0,0,d,0,0); }
 addEventListener('resize', fitHC); fitHC();
 
+function insecure(){ return !window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia; }
+const INSECURE_MSG='La cámara está bloqueada porque abriste el archivo desde WhatsApp o Archivos. Ábrelo desde su enlace https:// (por ejemplo GitHub Pages) y vuelve a tocar el botón.';
 function errMsg(e){
+  if(insecure()) return INSECURE_MSG;
   if(e && e.name==='NotAllowedError') return 'Permiso de cámara denegado. Actívalo desde el icono de la barra de direcciones y vuelve a intentarlo.';
   if(e && e.name==='NotFoundError') return 'No se encontró ninguna cámara conectada.';
   if(e && e.name==='NotReadableError') return 'La cámara está ocupada por otra aplicación. Ciérrala y vuelve a intentarlo.';
@@ -2686,6 +2719,7 @@ async function createLandmarker(){
   catch(e){ return await HandLandmarker.createFromOptions(fs, opts('CPU')); }
 }
 async function start(){
+  if(insecure()){ status.textContent=INSECURE_MSG; return; }
   if(rearMode) stopRear();
   btn.disabled = true;
   try{
@@ -2694,7 +2728,7 @@ async function start(){
     status.textContent = 'Esperando permiso de la cámara…';
     stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'user', width:{ideal:960}, height:{ideal:540}, frameRate:{ideal:30} }, audio:false });
     video.srcObject = stream; await video.play();
-    running = true; window.handsRunning = true; S.refresh();
+    running = true; handsEnabled = true; window.handsRunning = true; if(bodyOn) S.setBody(true,true); S.refresh();
     document.body.classList.add('ar');
     $('#camBgWrap').style.display = 'flex';
     btn.textContent = 'Desactivar control con manos';
@@ -2706,6 +2740,7 @@ async function start(){
 function releaseAll(){ Object.keys(hands).forEach(k=>{ release(hands[k],false); delete hands[k]; }); two=null; }
 function stop(){
   if(rearMode){ stopRear(); return; }
+  if(bodyOn){ bodyOn=false; S.setBody(false); bodyLabel(); }
   running = false; window.handsRunning = false;
   if(stream){ stream.getTracks().forEach(t=>t.stop()); stream = null; }
   document.body.classList.remove('ar');
@@ -2721,6 +2756,7 @@ btn.addEventListener('click', ()=> running ? stop() : start());
 // ---- Cámara trasera: el modelo sobre lo que ve el teléfono + giroscopio + (opcional) la otra mano ----
 const rearBtn=$('#rearBtn');
 async function startRear(){
+  if(insecure()){ status.textContent=INSECURE_MSG; return; }
   const gyro=S.requestGyro();                 // tiene que ir antes de cualquier espera (regla de iPhone)
   if(running&&!rearMode) stop();
   rearBtn.disabled=true;
@@ -2733,9 +2769,11 @@ async function startRear(){
     let msg=g==='granted'?'Mueve el teléfono: el modelo queda fijo delante de ti. Un dedo gira, dos dedos cambian el tamaño.':'Sin permiso de movimiento: gira con un dedo y cambia el tamaño con dos.';
     status.textContent=msg;
     rearBtn.textContent='Salir de la cámara trasera';
+    handsEnabled=false; running=true; requestAnimationFrame(loop);
+    if(bodyOn) S.setBody(true,false);
     if($('#tRearHands').checked){
       try{ status.textContent=msg+' Cargando manos…'; if(!landmarker) landmarker=await createLandmarker();
-        running=true; window.handsRunning=true; requestAnimationFrame(loop);
+        handsEnabled=true; window.handsRunning=true;
         status.textContent=msg+' También puedes pellizcar con tu otra mano frente a la cámara.'; }
       catch(e){ status.textContent=msg+' (No se pudo activar el control con manos.)'; }
     }
@@ -2744,6 +2782,7 @@ async function startRear(){
   rearBtn.disabled=false;
 }
 function stopRear(){
+  if(bodyOn){ bodyOn=false; S.setBody(false); bodyLabel(); }
   rearMode=false; running=false; window.handsRunning=false;
   if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
   document.body.classList.remove('ar','rear'); S.setRear(false);
@@ -2755,6 +2794,63 @@ $('#recenterBtn').addEventListener('click',()=>S.rearRecenter());
 $('#tCam').addEventListener('change', e => document.body.classList.toggle('nocam', !e.target.checked));
 document.addEventListener('xr-starting', ()=>{ if(running) stop(); });
 document.addEventListener('visibilitychange', ()=>{ if(document.hidden) releaseAll(); });   // al cambiar de pestaña no queda nada "agarrado"
+
+
+// ---- Superponer el tórax sobre el cuerpo (MediaPipe Pose) ----
+const POSE_MODEL='https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task';
+let poser=null, bodyOn=false, poseTick=0, handsEnabled=true;
+const bodyBtn=$('#bodyBtn');
+async function createPoser(){
+  const { PoseLandmarker, FilesetResolver } = await import(MP + '/vision_bundle.mjs');
+  const fs = await FilesetResolver.forVisionTasks(MP + '/wasm');
+  const o = d => ({ baseOptions:{ modelAssetPath:POSE_MODEL, delegate:d }, runningMode:'VIDEO', numPoses:1,
+    minPoseDetectionConfidence:0.5, minPosePresenceConfidence:0.5, minTrackingConfidence:0.5 });
+  try { return await PoseLandmarker.createFromOptions(fs, o('GPU')); }
+  catch(e){ return await PoseLandmarker.createFromOptions(fs, o('CPU')); }
+}
+function toScreenExact(p){          // igual que toScreen pero sin amplificar: debe coincidir con la imagen
+  const W=innerWidth, H=innerHeight, vw=video.videoWidth||960, vh=video.videoHeight||540;
+  const s=Math.max(W/vw,H/vh), dw=vw*s, dh=vh*s;
+  return { x:(W-dw)/2+(rearMode?p.x:1-p.x)*dw, y:(H-dh)/2+p.y*dh };
+}
+function bodyLabel(){ bodyBtn.textContent = bodyOn ? 'Quitar la superposición del cuerpo' : 'Superponer en el cuerpo'; }
+async function toggleBody(){
+  if(bodyOn){ bodyOn=false; S.setBody(false); bodyLabel(); return; }
+  if(insecure()){ status.textContent=INSECURE_MSG; return; }
+  if(!stream){ await start(); if(!stream) return; }            // si no hay cámara, enciende la frontal
+  bodyBtn.disabled=true; status.textContent='Cargando el detector de cuerpo…';
+  try{
+    if(!poser) poser=await createPoser();
+    bodyOn=true; S.setBody(true,!rearMode); bodyLabel();
+    status.textContent=rearMode?'Apunta a la persona: hombros y, si se puede, la cadera a la vista.':'Ponte de frente a la cámara con hombros y cadera a la vista.';
+  }catch(e){ status.textContent='No se pudo cargar el detector de cuerpo. Revisa tu conexión a internet.'; }
+  bodyBtn.disabled=false;
+}
+bodyBtn.addEventListener('click',toggleBody);
+function processPose(res){
+  const lm=res.landmarks&&res.landmarks[0]; if(!lm) return;
+  const vis=i=>lm[i].visibility===undefined?1:lm[i].visibility;
+  if(vis(11)<0.5||vis(12)<0.5) return;                           // sin hombros no hay superposición
+  const Ls=toScreenExact(lm[11]), Rs=toScreenExact(lm[12]);        // 11 = hombro izquierdo de la persona
+  const dx=Ls.x-Rs.x, dy=Ls.y-Rs.y, ws=Math.hypot(dx,dy); if(ws<20) return;
+  const sm={x:(Ls.x+Rs.x)/2,y:(Ls.y+Rs.y)/2};
+  let hm, ppu;
+  if(vis(23)>0.5&&vis(24)>0.5){
+    const a=toScreenExact(lm[23]), b=toScreenExact(lm[24]); hm={x:(a.x+b.x)/2,y:(a.y+b.y)/2};
+    ppu=Math.max(ws/6.2*0.9,Math.hypot(hm.x-sm.x,hm.y-sm.y)/7.2);
+  } else {                                                          // cadera fuera de cuadro: se estima hacia abajo
+    ppu=ws/6.2; let px=-dy/ws, py=dx/ws; if(py<0){ px=-px; py=-py; }
+    hm={x:sm.x+px*7.2*ppu, y:sm.y+py*7.2*ppu};
+  }
+  const mirror=!rearMode, ux=dx, uy=-dy;
+  const roll=mirror?Math.atan2(-uy,-ux):Math.atan2(uy,ux);
+  let yaw=0; const wl=res.worldLandmarks&&res.worldLandmarks[0];
+  if(wl){ yaw=clamp(Math.atan2(wl[11].z-wl[12].z,wl[11].x-wl[12].x),-1,1)*0.8; if(mirror) yaw=-yaw; }
+  S.bodyUpdate({cx:(sm.x+hm.x)/2, cy:(sm.y+hm.y)/2, ppu, roll, yaw});
+  // guía discreta sobre hombros y cadera
+  hx.save(); hx.fillStyle='rgba(125,240,192,0.8)';
+  [Ls,Rs,hm].forEach(p=>{ hx.beginPath(); hx.arc(p.x,p.y,5,0,Math.PI*2); hx.fill(); }); hx.restore();
+}
 
 function toScreen(p){
   const W=innerWidth, H=innerHeight, vw=video.videoWidth||960, vh=video.videoHeight||540;
@@ -2827,7 +2923,10 @@ function loop(){
   const now=performance.now();
   if(video.readyState>=2 && video.currentTime!==lastVT && now-lastDetect>=DETECT_MS){
     lastVT=video.currentTime; lastDetect=now;
-    try{ process(landmarker.detectForVideo(video, now)); }
+    try{
+      if(handsEnabled&&landmarker) process(landmarker.detectForVideo(video, now)); else hx.clearRect(0,0,innerWidth,innerHeight);
+      if(bodyOn&&poser&&(++poseTick%2===0)) processPose(poser.detectForVideo(video, now+0.5));
+    }
     catch(e){ console.warn('seguimiento de manos',e); releaseAll(); }       // un error no deja la mano "trabada"
   }
   requestAnimationFrame(loop);

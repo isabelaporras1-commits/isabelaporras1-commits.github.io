@@ -1,5 +1,5 @@
 // Service worker: la app abre sin conexión después del primer uso
-const CACHE='cardio-ra-v14';
+const CACHE='cardio-ra-v16';
 const CORE=['./','./index.html','./manifest.webmanifest','./icons/icon-192.png','./icons/icon-512.png','./icons/icon-maskable-512.png'];
 const EXT=/cdnjs\.cloudflare\.com|cdn\.jsdelivr\.net|storage\.googleapis\.com|fonts\.googleapis\.com|fonts\.gstatic\.com/;
 self.addEventListener('install',e=>{ e.waitUntil(caches.open(CACHE).then(c=>c.addAll(CORE)).then(()=>self.skipWaiting())); });
